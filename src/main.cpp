@@ -9,7 +9,7 @@
 #include "esp_mac.h"
 
 #define SERVO_PIN GPIO_NUM_4
-#define THROTTLE_PIN GPIO_NUM_5 // <-- Added pin for the throttle (ESC)
+#define THROTTLE_PIN GPIO_NUM_5
 
 typedef struct struct_message {
     int16_t steering;
@@ -18,7 +18,6 @@ typedef struct struct_message {
 
 struct_message myData;
 
-// Global variables
 volatile int16_t target_steering = 0;
 volatile int16_t target_throttle = 0;
 
@@ -29,6 +28,7 @@ extern "C" void OnDataRecv(const esp_now_recv_info_t *esp_now_info, const uint8_
 }
 
 extern "C" void app_main(void) {
+    // Delay to allow serial monitor to catch startup prints
     vTaskDelay(2000 / portTICK_PERIOD_MS);
     
     // 1. Initialize Wi-Fi and ESP-NOW
@@ -42,7 +42,15 @@ extern "C" void app_main(void) {
     esp_now_init();
     esp_now_register_recv_cb(OnDataRecv);
 
-    // 2. Configure the shared timer (50Hz for standard RC)
+    // Fetch and print the MAC address
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    printf("\n=========================================\n");
+    printf("DEVICE MAC ADDRESS: %02X:%02X:%02X:%02X:%02X:%02X\n", 
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    printf("=========================================\n\n");
+
+    // 2. Configure the shared timer (50Hz)
     ledc_timer_config_t ledc_timer = {};
     ledc_timer.speed_mode       = LEDC_LOW_SPEED_MODE;
     ledc_timer.duty_resolution  = LEDC_TIMER_14_BIT; // 16384 total steps
@@ -66,15 +74,15 @@ extern "C" void app_main(void) {
     ledc_channel_config_t throttle_channel = {};
     throttle_channel.gpio_num       = THROTTLE_PIN;
     throttle_channel.speed_mode     = LEDC_LOW_SPEED_MODE;
-    throttle_channel.channel        = LEDC_CHANNEL_1; // Must be a different channel
+    throttle_channel.channel        = LEDC_CHANNEL_1; 
     throttle_channel.intr_type      = LEDC_INTR_DISABLE;
-    throttle_channel.timer_sel      = LEDC_TIMER_0;   // Shares the same timer
+    throttle_channel.timer_sel      = LEDC_TIMER_0;   
     throttle_channel.duty           = 0;
     throttle_channel.hpoint         = 0;
     ledc_channel_config(&throttle_channel);
 
     while (1) {
-        // Map the payload values to a 1000us to 2000us pulse
+        // Map the -100 to 100 values to a 1000us to 2000us pulse
         uint32_t steering_pulse_us = 1500 + (target_steering * 5); 
         uint32_t throttle_pulse_us = 1500 + (target_throttle * 5); 
 
@@ -90,8 +98,8 @@ extern "C" void app_main(void) {
         ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1, throttle_duty);
         ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_1);
 
-        printf("Steering: %d -> %lu us | Throttle: %d -> %lu us\n", 
-                target_steering, steering_pulse_us, target_throttle, throttle_pulse_us);
+        printf("Steering Payload: %d | Throttle Payload: %d\n", target_steering, target_throttle);
+        printf("-> S Pulse: %lu us | T Pulse: %lu us\n", steering_pulse_us, throttle_pulse_us);
 
         vTaskDelay(20 / portTICK_PERIOD_MS);
     }
